@@ -234,13 +234,15 @@ class TestNVM():
                 if DEBUG>1: print "Error - No Ack/Nak on 2nd try"
         elif ord(c)!=ACK:
             if DEBUG>1: print "Error - not ACKed = 0x{:02X}".format(ord(c))
-            if ord(c)==CAN:
-                self.UZB.write(pack("B",ACK))   # send an ACK to try to clear the CAN
-                time.sleep(1)
-                for c in pkt:
-                    self.UZB.write(c) # resend the command
-                c=self.GetRxChar(500) # Just drop the ACK this time thru
-                if DEBUG>1: print "Second ACK=0x{:02X}".format(ord(c))
+            self.UZB.write(pack("B",ACK))   # send an ACK to stop any retries
+            time.sleep(1)
+            while self.UZB.inWaiting(): # purge UART RX to remove any old frames we don't want
+                c=self.UZB.read()
+            for c in pkt:
+                self.UZB.write(c) # resend the command
+            c=self.GetRxChar(500)
+            if c==None:
+                if DEBUG>1: print "ERROR - No Ack/Nak on 2nd try"
         response=None
         if returnStringFlag:    # wait for the returning frame for up to 5 seconds
             response=self.GetZWave()    
