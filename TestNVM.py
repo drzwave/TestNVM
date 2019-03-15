@@ -17,7 +17,6 @@
     TODO
     1) retry the read/write as it doesn't seem to complete all the time.
     2) If retry doesn't fix it, then debug it using the serial decoder
-    3) add a single byte write
     4) Add a long test that writes every possibly value to the entire NVM and then reboots the chip - is there a value that causes it to hang?
 '''
 
@@ -45,6 +44,7 @@ FUNC_ID_GET_HOME_ID                 = 0x20
 FUNC_ID_NVM_GET_MFG_ID              = 0x29
 FUNC_ID_NVM_EXT_READ_BUF            = 0x2A
 FUNC_ID_NVM_EXT_WRITE_BUF           = 0x2B
+FUNC_ID_NVM_EXT_WRITE_BYTE          = 0x2D
 FUNC_ID_ZW_SET_DEFAULT              = 0x42
 FUNC_ID_ZW_ADD_NODE_TO_NETWORK      = 0x4A
 FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK = 0x4B
@@ -225,6 +225,13 @@ class TestNVM():
         c=self.GetRxChar(500) # wait up to half second for the ACK
         if c==None:
             if DEBUG>1: print "Error - no ACK or NAK"
+            # try resending one time
+            self.UZB.write(pack("B",ACK))  # ACK just to clear out any retries
+            for c in pkt:
+                self.UZB.write(c)  # resend the command
+            c=self.GetRxChar(1500) # wait for the ACK
+            if c==None:
+                if DEBUG>1: print "Error - No Ack/Nak on 2nd try"
         elif ord(c)!=ACK:
             if DEBUG>1: print "Error - not ACKed = 0x{:02X}".format(ord(c))
             if ord(c)==CAN:
@@ -256,6 +263,9 @@ class TestNVM():
 
     def PrintVersion(self):
         pkt=self.Send2ZWave(pack("B",FUNC_ID_SERIAL_API_GET_CAPABILITIES),True)
+        if pkt==None: 
+            print "Failed to communicate with Z-Wave Chip"
+            return
         (ver, rev, man_id, man_prod_type, man_prod_type_id, supported) = unpack("!2B3H32s", pkt[1:])
         print "SerialAPI Ver={0}.{1}".format(ver,rev)   # SerialAPI version is different than the SDK version
         print "Mfg={:04X}".format(man_id)
@@ -371,6 +381,19 @@ if __name__ == "__main__":
                     print "{:02X}".format(ord(pkt[j])),
             print " "
 
+        elif line[0] == 'w':                          ############## Write a single byte to address aaaaaa
+            linesplit=line.split()
+            if len(linesplit)>2:
+                addr=int(linesplit[1],16)
+                data=int(linesplit[2],16)
+            else:
+                print "w aaaaaa dd - write dd to address aaaaaa. Values are in hex"
+            pkt=self.Send2ZWave(pack("B3BB",FUNC_ID_NVM_EXT_WRITE_BYTE,(addr>>16)&0xFF,(addr>>8)&0xFF,(addr>>0)&0xFF ,data),True) 
+            if pkt[1] != 0:
+                print "Write of {:X} to {:X} complete".format(data,addr)
+            else:
+                print "Write failed"
+
         elif line[0] == 'f':                          ############## fill the entire NVM with the value included 
             linesplit=line.split()
             if len(linesplit)>1:
@@ -384,7 +407,7 @@ if __name__ == "__main__":
                     val,val,val,val,val,val,val,val,
                     val,val,val,val,val,val,val,val),True) 
                 addr+=16
-                print "{:X}={:x}".format(addr,ord(pkt[1]))
+                if DEBUG>9: print "{:X}={:x}".format(addr,ord(pkt[1]))
 
         elif line[0] == 'd':                          ############## dump the entire NVM to a filed called NVM.hex (assumes a 2mbit NVM)
             # TODO could try to figure out the size here and then just dump the actual size
