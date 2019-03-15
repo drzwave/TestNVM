@@ -13,10 +13,11 @@ This program can also serve as a demonstrator on how to use the SerialAPI.
 # Usage
 ```
 python TestNVM.py [COMxx]
-The optional COMxx parameter is the serial port connection from the PC or Raspberry Pi.
-The program was tested using a Raspberry Pi with the ZM5x0x connected to the UART on the 40 pin header on /dev/ttyAMA0.
-Once the program begins, a menu of commands is listed.
-Press ? to get help.
+ The optional COMxx parameter is the serial port connection from the PC or Raspberry Pi.
+ The program was tested using a Raspberry Pi with the ZM5x0x connected to the UART 
+  on the 40 pin header on /dev/ttyAMA0.
+ Once the program begins, a menu of commands is listed.
+ Press ? to get help.
 ```
 
 # Setup

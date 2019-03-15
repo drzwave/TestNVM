@@ -4,8 +4,6 @@
 
     This program is a DEMO only and is provided AS-IS and without support. 
     But feel free to copy and improve!
-    This program can be used as a guide to implement you own firmware update in your
-    language of choice.
 
     Usage: python TestNVM.py [COMx]
     COMx is optional and is the COM port or /dev/tty* port of the Z-Wave interface.
@@ -14,6 +12,13 @@
    References:
    SerialAPI: https://www.silabs.com/documents/login/user-guides/INS12350-Serial-API-Host-Appl.-Prg.-Guide.pdf (or search "SerialAPI" on the silabs site)
    NVM Interface: INS13954-7 Application Programmers Guide V6.81.xx section 4.8 describes the NVM API
+
+
+    TODO
+    1) retry the read/write as it doesn't seem to complete all the time.
+    2) If retry doesn't fix it, then debug it using the serial decoder
+    3) add a single byte write
+    4) Add a long test that writes every possibly value to the entire NVM and then reboots the chip - is there a value that causes it to hang?
 '''
 
 import serial           # serial port control
@@ -25,7 +30,7 @@ from struct            import * # PACK
 
 COMPORT       = "/dev/ttyAMA0" # Serial port default on a Raspberry Pi
 
-VERSION       = "0.1 - 3/14/2019"       # Version of this python program
+VERSION       = "0.2 - 3/15/2019"       # Version of this python program
 DEBUG         = 9     # higher values print out more debugging info - 0=off
 
 # Handy defines mostly copied from ZW_transport_api.py
@@ -89,6 +94,15 @@ TRANSMIT_ROUTING_NOT_IDLE =0x03
 TRANSMIT_OPTION_ACK = 0x01
 TRANSMIT_OPTION_AUTO_ROUTE = 0x04
 TRANSMIT_OPTION_EXPLORE = 0x20
+ADD_NODE_STATUS_LEARN_READY          = 1
+ADD_NODE_STATUS_NODE_FOUND           = 2
+ADD_NODE_STATUS_ADDING_SLAVE         = 3
+ADD_NODE_STATUS_ADDING_CONTROLLER    = 4
+ADD_NODE_STATUS_PROTOCOL_DONE        = 5
+ADD_NODE_STATUS_DONE                 = 6
+ADD_NODE_STATUS_FAILED               = 7
+ADD_NODE_STATUS_NOT_PRIMARY          = 0x23
+
 # SerialAPI defines
 SOF = 0x01
 ACK = 0x06
@@ -125,30 +139,19 @@ ZWAVE_VER_DECODE = {# Z-Wave version to SDK decoder: https://www.silabs.com/prod
         "3.37" : "SDK 6.01.03        "
         }
 
-class ZWaveCtl():
+class TestNVM():
     ''' Open the serial port to the Z-Wave SerialAPI controller '''
     def __init__(self):         # parse the command line arguments and open the serial port
         self.COMPORT=COMPORT
         self.filename=""
-        if len(sys.argv)==1:     # No arguments then just print the status if the serial port can be opened
+        if len(sys.argv)==1:     # No arguments then try the default serial port
             pass
         elif len(sys.argv)==2: 
-            if "COM" in sys.argv[1] or "tty" in sys.argv[1]: # no filename - just check the status
-                self.COMPORT=sys.argv[1]
-            else:                                           # use the default COMPORT
-                self.filename=sys.argv[1]
-        elif len(sys.argv)==3:                           # Both comport and filename
-            if "COM" in sys.argv[2] or "tty" in sys.argv[2]:
-                self.COMPORT=sys.argv[2]
-                self.filename=sys.argv[1]
-            elif "COM" in sys.argv[1] or "tty" in sys.argv[1]:
-                self.COMPORT=sys.argv[1]
-                self.filename=sys.argv[2]
+            self.COMPORT=sys.argv[1]
         else:
             self.usage()
             sys.exit()
         if DEBUG>3: print "COM Port set to {}".format(self.COMPORT)
-        if DEBUG>3: print "Filename set to {}".format(self.filename)
         try:
             self.UZB= serial.Serial(self.COMPORT,'115200',timeout=2)
         except serial.SerialException:
@@ -276,27 +279,32 @@ class ZWaveCtl():
     def usage(self):
         print ""
         print "Usage: python TestNVM.py [COMxx]"
+        print " COMxx is the Z-Wave UART interface - typically COMxx for windows and /dev/ttyXXXX for Linux"
         print "Version {}".format(VERSION)
-        print "COMxx is the Z-Wave UART interface - typically COMxx for windows and /dev/ttyXXXX for Linux"
+        print "Commands:"
         print "p=Probe the NVM and report MFG and size"
         print "h=Print the HomeID and NodeID"
-        print "d=dump the NVM contents to a file called NVM.hex"
-        print "f [dd] = Fill the entire NVM with the value dd"
-        print "s=Soft Reset the Z-Wave chip"
-        print "S=Factory Reset the Z-Wave chip - NVM is reset to defaults, Z-Wave network deleted"
+        print "d=dump the NVM contents to the file NVM.hex"
+        print "f [dd] = Fill the entire NVM with the value dd (0 by default)"
+        print "s=Soft Reset the Z-Wave chip (reboot)"
+        print "S=Factory Reset the Z-Wave chip - NVM is initialized, Z-Wave network deleted, ZW_SetDefault()"
         print "r [aaaaaa]=Read 256 bytes starting at address aaaaaa in hex"
+        print "v=Print SDK Version of the controller and other info"
+        print "+=Include a node"
+        print "-=Exclude a node"
+        print "x=Exit program"
         print ""
 
 if __name__ == "__main__":
     ''' Start the app if this file is executed'''
     try:
-        self=ZWaveCtl()
+        self=TestNVM()
     except:
         print 'error - unable to start program'
         self.usage()
         exit()
 
-    # fetch and display various attributes of the Controller - these are not required
+    # fetch and display various attributes of the Controller
     self.PrintVersion()
 
     while True:
@@ -395,6 +403,40 @@ if __name__ == "__main__":
                     f.write("{:02X}".format(ord(pkt[j])))
             f.close()
             print "Dump completed"
+
+        elif line[0]=='v':                          ########################## Print the version of the controller
+            self.PrintVersion()
+
+        elif line[0]=='+':                          ########################## Inclusion mode
+            pkt=self.Send2ZWave(pack("3B",FUNC_ID_ZW_ADD_NODE_TO_NETWORK, ADD_NODE_ANY, 0xaa),True)
+            (cmd,FuncID,bStatus)= unpack("BBB",pkt[:3]) # first status should be 01=learn_ready
+            if (bStatus==ADD_NODE_STATUS_LEARN_READY):
+                print "Press Button on Device"
+            while not (bStatus==ADD_NODE_STATUS_FAILED or bStatus==ADD_NODE_STATUS_DONE): # will get several callbacks until DONE with info along the way
+                pkt=self.GetZWave(50*1000)      # wait for up to 50seconds for a response
+                (cmd,FuncID,bStatus)= unpack("BBB",pkt[:3])
+                #print "Adding Status={}".format(bStatus)
+                if bStatus==ADD_NODE_STATUS_PROTOCOL_DONE: # required to send it again to get to DONE
+                    pkt=self.Send2ZWave(pack("3B",FUNC_ID_ZW_ADD_NODE_TO_NETWORK, ADD_NODE_STOP, 0xaa),False)
+                if (bStatus==ADD_NODE_STATUS_ADDING_SLAVE or bStatus==ADD_NODE_STATUS_ADDING_CONTROLLER):
+                    stuff,=unpack("B",pkt[3])
+                    print "Added Node {}".format(stuff)
+            if bStatus==ADD_NODE_STATUS_FAILED:
+                print "Add node failed"
+            self.Send2ZWave(pack("BB",FUNC_ID_ZW_ADD_NODE_TO_NETWORK, ADD_NODE_STOP),False) # cleanup
+
+        elif line[0]=='-':                          ############################### Exclusion mode
+            pkt=self.Send2ZWave(pack("3B",FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK, REMOVE_NODE_ANY, 0xdd),True) # go into exclude mode but wait up to 60 seconds for a response
+            (cmd,FuncID,bStatus)= unpack("BBB",pkt[:3]) # first status should be 01=learn_ready
+            if (bStatus==REMOVE_NODE_STATUS_LEARN_READY):
+                print "Press Button on Device"
+            while not (bStatus==REMOVE_NODE_STATUS_FAILED or bStatus==REMOVE_NODE_STATUS_DONE): # will get several callbacks until DONE with info along the way
+                pkt=self.GetZWave(50*1000)      # wait for up to 50seconds for a response
+                (cmd,FuncID,bStatus)= unpack("BBB",pkt[:3])
+                if (bStatus==REMOVE_NODE_STATUS_REMOVING_SLAVE or bStatus==REMOVE_NODE_STATUS_REMOVING_CONTROLLER):
+                    stuff,=unpack("B",pkt[3])
+                    print "Excluded Node {}".format(stuff)
+            self.Send2ZWave(pack("BB",FUNC_ID_ZW_REMOVE_NODE_FROM_NETWORK, REMOVE_NODE_STOP),False) # cleanup
         else:
             self.usage()
     exit()
