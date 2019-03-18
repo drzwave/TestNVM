@@ -1,6 +1,7 @@
 ''' Z-Wave NVM Test Utility
 
     This Python program provides some test functions for testing the Z-Wave chip external NVM.
+    The Z-Wave 500 series chip must be programmed with the SerialAPI.
 
     This program is a DEMO only and is provided AS-IS and without support. 
     But feel free to copy and improve!
@@ -14,10 +15,6 @@
    NVM Interface: INS13954-7 Application Programmers Guide V6.81.xx section 4.8 describes the NVM API
 
 
-    TODO
-    1) retry the read/write as it doesn't seem to complete all the time.
-    2) If retry doesn't fix it, then debug it using the serial decoder
-    4) Add a long test that writes every possibly value to the entire NVM and then reboots the chip - is there a value that causes it to hang?
 '''
 
 import serial           # serial port control
@@ -29,8 +26,8 @@ from struct            import * # PACK
 
 COMPORT       = "/dev/ttyAMA0" # Serial port default on a Raspberry Pi
 
-VERSION       = "0.2 - 3/15/2019"       # Version of this python program
-DEBUG         = 9     # higher values print out more debugging info - 0=off
+VERSION       = "1.0 - 3/18/2019"       # Version of this python program
+DEBUG         = 4     # (0-10) higher values print out more debugging info - 0=off
 
 # Handy defines mostly copied from ZW_transport_api.py
 FUNC_ID_SERIAL_API_GET_INIT_DATA    = 0x02
